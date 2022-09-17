@@ -1,152 +1,149 @@
-use std::{io, error::Error, time::{Duration, Instant}};
-use clap::Parser;
-use crossterm::{terminal::{enable_raw_mode, EnterAlternateScreen, disable_raw_mode, LeaveAlternateScreen}, execute, event::{EnableMouseCapture, DisableMouseCapture, Event, KeyCode, self}};
-use tui::{backend::{CrosstermBackend, Backend}, Terminal, Frame, widgets::{Block, Borders, Paragraph, Wrap}, style::{Style, Color, Modifier}, layout::{Layout, Direction, Constraint, Alignment}, text::{Spans, Span}};
+use clap::{Parser, clap_derive::ArgEnum};
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    terminal,
+};
+use serialport::SerialPort;
+use std::{
+    error::Error,
+    io::{self, Read, Write},
+    sync::mpsc::{self, Receiver, Sender, TryRecvError},
+    thread,
+    time::Duration,
+};
 
+
+#[derive(Debug, Clone, ArgEnum)]
+enum ArgsFlowControl {
+    Soft,
+    Hard,
+    None
+}
+
+#[derive(Debug, Clone, ArgEnum)]
+enum ArgsParity {
+    Even,
+    Odd,
+    None
+}
+
+/// Really Simple Communication application
+/// Much like picocom.
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
+    /// Path to device to use (i.e. /dev/ttyS1, COM1)
     #[clap()]
     port: String,
 
+    /// Baudrate to use with the serial device
     #[clap(short, long, default_value_t = 115_200)]
-    baudrate: i32,
+    baudrate: u32,
+
+    /// Set flow control
+    #[clap(short, long, arg_enum, default_value_t = ArgsFlowControl::None)]
+    flowcontrol: ArgsFlowControl,
+
+    /// Set parity
+    #[clap(short, long, arg_enum, default_value_t = ArgsParity::None)]
+    parity: ArgsParity,
+}
+
+struct Application {
+    port: Box<dyn SerialPort>
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // let args = Args::parse();
-    let mut port = serialport::new("/dev/ttyUSB0", 115_200)
-        .open().expect("Failed to open");
+    let args = Args::parse();
 
-    let output = "This is a test. This is only a test.".as_bytes();
-    port.write(output).expect("Write failed!");
+    let flowcontrol = match args.flowcontrol {
+        ArgsFlowControl::Soft => serialport::FlowControl::Software,
+        ArgsFlowControl::Hard => serialport::FlowControl::Hardware,
+        ArgsFlowControl::None => serialport::FlowControl::None
+    };
 
-    // setup terminal
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    let parity = match args.parity {
+        ArgsParity::Even => serialport::Parity::Even,
+        ArgsParity::Odd => serialport::Parity::Odd,
+        ArgsParity::None => serialport::Parity::None
+    };
 
-    // create app and run it
-    let res = run_app(&mut terminal);
+    let port = serialport::new(args.port, args.baudrate)
+        .flow_control(flowcontrol)
+        .parity(parity)
+        .open()
+        .expect("Failed to open");
 
-    // restore terminal
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
-
-    if let Err(err) = res {
-        println!("{:?}", err)
-    }
-
+    let mut app = Application::new(port);
+    app.run();
     Ok(())
 }
 
-fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
-    let tick_rate = Duration::from_millis(100);
-    let mut last_tick = Instant::now();
-    loop {
-        terminal.draw(|f| ui(f))?;
 
-        let timeout = tick_rate
-            .checked_sub(last_tick.elapsed())
-            .unwrap_or_else(|| Duration::from_secs(0));
-        if crossterm::event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
-                if let KeyCode::Char('q') = key.code {
-                    return Ok(());
+
+impl Application {
+
+    fn new(port: Box<dyn SerialPort>) -> Self {
+        _ = terminal::enable_raw_mode();
+        Self {port}
+    }
+
+
+    fn run(&mut self) {
+        let (tx, rx): (Sender<char>, Receiver<char>) = mpsc::channel();
+
+        self.launch_input_reader(tx);
+
+        self.launch_serial_comms(rx);
+
+    }
+
+    fn launch_serial_comms(&mut self, rx: Receiver<char>) {
+        let mut serial_buf = vec![0; 1000];
+        loop {
+            match self.port.read(serial_buf.as_mut_slice()) {
+                Ok(size) => io::stdout().write_all(&serial_buf[..size]).unwrap(),
+                Err(ref error) if error.kind() == io::ErrorKind::TimedOut => (),
+                Err(error) => eprintln!("Write Error {:?}", error),
+            }
+            match rx.try_recv() {
+                Ok(key) => {
+                    _ = self.port
+                        .write(&key.to_string().as_bytes())
+                        .expect("Write failed")
+                }
+                Err(TryRecvError::Empty) => (),
+                Err(TryRecvError::Disconnected) => break,
+            }
+            std::thread::sleep(Duration::from_millis(100))
+        }
+    }
+
+    fn launch_input_reader(&mut self, tx: Sender<char>) {
+        _ = thread::spawn(move || loop {
+            if let Event::Key(event) = event::read().expect("Failed to read line") {
+                match event {
+                    KeyEvent {
+                        code: KeyCode::Char('q'),
+                        modifiers: KeyModifiers::CONTROL,
+                        ..
+                    } => break,
+                    KeyEvent {
+                        code: KeyCode::Char(c),
+                        ..
+                    } => {
+                        tx.send(c).unwrap_or_else(|_| ());
+                    }
+                    _ => (),
                 }
             }
-        }
-        if last_tick.elapsed() >= tick_rate {
-            last_tick = Instant::now();
-        }
+        });
     }
 }
 
-fn ui<B: Backend>(f: &mut Frame<B>) {
-    let size = f.size();
+impl Drop for Application {
+    fn drop(&mut self) {
+        _ = terminal::disable_raw_mode();
+    }
 
-    // Words made "loooong" to demonstrate line breaking.
-    let s = "Veeeeeeeeeeeeeeeery    loooooooooooooooooong   striiiiiiiiiiiiiiiiiiiiiiiiiing.   ";
-    let mut long_line = s.repeat(usize::from(size.width) / s.len() + 4);
-    long_line.push('\n');
-
-    let block = Block::default().style(Style::default().bg(Color::White).fg(Color::Black));
-    f.render_widget(block, size);
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(5)
-        .constraints(
-            [
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-            ]
-            .as_ref(),
-        )
-        .split(size);
-
-    let text = vec![
-        Spans::from("This is a line "),
-        Spans::from(Span::styled(
-            "This is a line   ",
-            Style::default().fg(Color::Red),
-        )),
-        Spans::from(Span::styled(
-            "This is a line",
-            Style::default().bg(Color::Blue),
-        )),
-        Spans::from(Span::styled(
-            "This is a longer line",
-            Style::default().add_modifier(Modifier::CROSSED_OUT),
-        )),
-        Spans::from(Span::styled(&long_line, Style::default().bg(Color::Green))),
-        Spans::from(Span::styled(
-            "This is a line",
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::ITALIC),
-        )),
-    ];
-
-    let create_block = |title| {
-        Block::default()
-            .borders(Borders::ALL)
-            .style(Style::default().bg(Color::White).fg(Color::Black))
-            .title(Span::styled(
-                title,
-                Style::default().add_modifier(Modifier::BOLD),
-            ))
-    };
-    let paragraph = Paragraph::new(text.clone())
-        .style(Style::default().bg(Color::White).fg(Color::Black))
-        .block(create_block("Left, no wrap"))
-        .alignment(Alignment::Left);
-    f.render_widget(paragraph, chunks[0]);
-    let paragraph = Paragraph::new(text.clone())
-        .style(Style::default().bg(Color::White).fg(Color::Black))
-        .block(create_block("Left, wrap"))
-        .alignment(Alignment::Left)
-        .wrap(Wrap { trim: true });
-    f.render_widget(paragraph, chunks[1]);
-    let paragraph = Paragraph::new(text.clone())
-        .style(Style::default().bg(Color::White).fg(Color::Black))
-        .block(create_block("Center, wrap"))
-        .alignment(Alignment::Center)
-        .wrap(Wrap { trim: true });
-    f.render_widget(paragraph, chunks[2]);
-    let paragraph = Paragraph::new(text)
-        .style(Style::default().bg(Color::White).fg(Color::Black))
-        .block(create_block("Right, wrap"))
-        .alignment(Alignment::Right)
-        .wrap(Wrap { trim: true });
-    f.render_widget(paragraph, chunks[3]);
 }
