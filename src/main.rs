@@ -109,7 +109,7 @@ impl Application {
             match rx.try_recv() {
                 Ok(key) => {
                     _ = self.port
-                        .write(&key.to_string().as_bytes())
+                        .write(key.to_string().as_bytes())
                         .expect("Write failed")
                 }
                 Err(TryRecvError::Empty) => (),
@@ -132,7 +132,7 @@ impl Application {
                         code: KeyCode::Char(c),
                         ..
                     } => {
-                        tx.send(c).unwrap_or_else(|_| ());
+                        tx.send(c).unwrap_or(());
                     }
                     _ => (),
                 }
