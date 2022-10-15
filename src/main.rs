@@ -2,17 +2,17 @@ mod application;
 
 use application::Application;
 
-use clap::{clap_derive::ArgEnum, Parser};
+use clap::{ValueEnum, Parser};
 use std::error::Error;
 
-#[derive(Debug, Clone, ArgEnum)]
+#[derive(Debug, Clone, ValueEnum)]
 enum ArgsFlowControl {
     Soft,
     Hard,
     None,
 }
 
-#[derive(Debug, Clone, ArgEnum)]
+#[derive(Debug, Clone, ValueEnum)]
 enum ArgsParity {
     Even,
     Odd,
@@ -33,11 +33,11 @@ struct Args {
     baudrate: u32,
 
     /// Set flow control
-    #[clap(short, long, arg_enum, default_value_t = ArgsFlowControl::None)]
+    #[clap(short, long, value_enum, default_value_t = ArgsFlowControl::None)]
     flowcontrol: ArgsFlowControl,
 
     /// Set parity
-    #[clap(short, long, arg_enum, default_value_t = ArgsParity::None)]
+    #[clap(short, long, value_enum, default_value_t = ArgsParity::None)]
     parity: ArgsParity,
 }
 
