@@ -49,7 +49,7 @@ impl Application {
                 Ok(size) => {
                     io::stdout().write_all(&serial_buf[..size]).unwrap();
                     io::stdout().flush().unwrap();
-                }
+                },
                 Err(ref error) if error.kind() == io::ErrorKind::TimedOut => (),
                 Err(error) => eprintln!("Write Error {:?}", error),
             }
