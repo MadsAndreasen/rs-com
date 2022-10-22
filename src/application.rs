@@ -22,17 +22,18 @@ impl Application {
 
     pub fn run(&mut self) {
         let (tx, rx): (Sender<char>, Receiver<char>) = mpsc::channel();
-
         self.launch_input_reader(tx);
-
         self.launch_serial_comms(rx);
     }
 
     fn launch_serial_comms(&mut self, rx: Receiver<char>) {
-        let mut serial_buf = vec![0; 1000];
+        let mut serial_buf = vec![0; 100];
         loop {
             match self.port.read(serial_buf.as_mut_slice()) {
-                Ok(size) => io::stdout().write_all(&serial_buf[..size]).unwrap(),
+                Ok(size) => {
+                    io::stdout().write_all(&serial_buf[..size]).unwrap();
+                    io::stdout().flush().unwrap();
+                },
                 Err(ref error) if error.kind() == io::ErrorKind::TimedOut => (),
                 Err(error) => eprintln!("Write Error {:?}", error),
             }
