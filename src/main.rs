@@ -3,7 +3,7 @@ mod application;
 use application::Application;
 
 use clap::{ValueEnum, Parser};
-use std::error::Error;
+use std::{error::Error};
 
 #[derive(Debug, Clone, ValueEnum)]
 enum ArgsFlowControl {

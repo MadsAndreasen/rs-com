@@ -9,7 +9,7 @@
             "type": "lldb",
             "request": "launch",
             "name": "Debug",
-            "program": "${workspaceFolder}/target/debug/rs-com",
+            "program": "${workspaceFolder}/target/debug/rscom",
             "args": ["/dev/ttyUSB0"],
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "rust: cargo build"
