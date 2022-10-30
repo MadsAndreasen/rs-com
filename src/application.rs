@@ -7,17 +7,29 @@ use std::{
     io::{self, Read, Write},
     sync::mpsc::{self, Receiver, Sender, TryRecvError},
     thread,
-    time::Duration,
+    time::Duration, collections::HashMap,
 };
+
+
+enum ApplicationState {
+    Command,
+    Io
+}
+
+struct Command<Cmd: FnOnce() -> String> {
+    character: char,
+    command: Cmd
+}
 
 pub struct Application {
     port: Box<dyn SerialPort>,
+    state: ApplicationState
 }
 
 impl Application {
     pub fn new(port: Box<dyn SerialPort>) -> Self {
         _ = terminal::enable_raw_mode();
-        Self { port }
+        Self { port, state: ApplicationState::Io }
     }
 
     pub fn run(&mut self) {
@@ -52,24 +64,55 @@ impl Application {
     }
 
     fn launch_input_reader(&mut self, tx: Sender<char>) {
-        _ = thread::spawn(move || loop {
-            if let Event::Key(event) = event::read().expect("Failed to read line") {
-                match event {
-                    KeyEvent {
-                        code: KeyCode::Char('q'),
-                        modifiers: KeyModifiers::CONTROL,
-                        ..
-                    } => break,
-                    KeyEvent {
-                        code: KeyCode::Char(c),
-                        ..
-                    } => {
-                        tx.send(c).unwrap_or(());
+        _ = thread::spawn(move || {
+                let commands = HashMap::from(
+                    [('q', || {println!("No quitters!")})]
+                );
+                let mut state = ApplicationState::Io;
+                loop {
+                    if let Event::Key(event) = event::read().expect("Failed to read line") {
+                        match state {
+                            ApplicationState::Io => {
+                                match event {
+                                    KeyEvent {
+                                        code: KeyCode::Char('a'),
+                                        modifiers: KeyModifiers::CONTROL,
+                                        ..
+                                    } => state = ApplicationState::Command,
+                                    KeyEvent {
+                                        code: KeyCode::Char(c),
+                                        ..
+                                    } => {
+                                        tx.send(c).unwrap_or(());
+                                    }
+                                    _ => (),
+                                }
+                            },
+                            ApplicationState::Command => {
+                                match event {
+                                    KeyEvent {
+                                        code: KeyCode::Char('x'),
+                                        modifiers: KeyModifiers::CONTROL,
+                                        ..
+                                    } => { state = ApplicationState::Io; break},
+                                    KeyEvent {
+                                        code: KeyCode::Char(code),
+                                        modifiers: KeyModifiers::CONTROL,
+                                        ..
+                                    } => {
+                                        match commands.get(&code) {
+                                            Some(func) => func(),
+                                            _ => ()
+                                        }
+                                        state = ApplicationState::Io;
+                                    }
+                                    _ => state = ApplicationState::Io
+                                }
+                            }
+                        }
                     }
-                    _ => (),
                 }
-            }
-        });
+            });
     }
 }
 
