@@ -4,32 +4,38 @@ use crossterm::{
 };
 use serialport::SerialPort;
 use std::{
+    collections::HashMap,
     io::{self, Read, Write},
-    sync::mpsc::{self, Receiver, Sender, TryRecvError},
+    sync::{
+        mpsc::{self, Receiver, Sender, TryRecvError},
+        Arc, RwLock,
+    },
     thread,
-    time::Duration, collections::HashMap,
+    time::Duration,
 };
-
 
 enum ApplicationState {
     Command,
-    Io
+    Io,
 }
 
 struct Command<Cmd: FnOnce() -> String> {
     character: char,
-    command: Cmd
+    command: Cmd,
 }
 
 pub struct Application {
     port: Box<dyn SerialPort>,
-    state: ApplicationState
+    state: Arc<RwLock<ApplicationState>>,
 }
 
 impl Application {
     pub fn new(port: Box<dyn SerialPort>) -> Self {
         _ = terminal::enable_raw_mode();
-        Self { port, state: ApplicationState::Io }
+        Self {
+            port,
+            state: Arc::new(RwLock::new(ApplicationState::Io)),
+        }
     }
 
     pub fn run(&mut self) {
@@ -45,17 +51,26 @@ impl Application {
                 Ok(size) => {
                     io::stdout().write_all(&serial_buf[..size]).unwrap();
                     io::stdout().flush().unwrap();
-                },
+                }
                 Err(ref error) if error.kind() == io::ErrorKind::TimedOut => (),
                 Err(error) => eprintln!("Write Error {:?}", error),
             }
             match rx.try_recv() {
                 Ok(key) => {
-                    _ = self
-                        .port
-                        .write(key.to_string().as_bytes())
-                        .expect("Write failed")
-                }
+                    let mut lock = self.state.write().unwrap();
+                    match *lock {
+                        ApplicationState::Io => {
+                            _ = self
+                                .port
+                                .write(key.to_string().as_bytes())
+                                .expect("Write failed")
+                        }
+                        ApplicationState::Command => {
+                            *lock = ApplicationState::Io;
+                            println!("Quitters")
+                        },
+                    }
+                },
                 Err(TryRecvError::Empty) => (),
                 Err(TryRecvError::Disconnected) => break,
             }
@@ -64,55 +79,25 @@ impl Application {
     }
 
     fn launch_input_reader(&mut self, tx: Sender<char>) {
-        _ = thread::spawn(move || {
-                let commands = HashMap::from(
-                    [('q', || {println!("No quitters!")})]
-                );
-                let mut state = ApplicationState::Io;
-                loop {
-                    if let Event::Key(event) = event::read().expect("Failed to read line") {
-                        match state {
-                            ApplicationState::Io => {
-                                match event {
-                                    KeyEvent {
-                                        code: KeyCode::Char('a'),
-                                        modifiers: KeyModifiers::CONTROL,
-                                        ..
-                                    } => state = ApplicationState::Command,
-                                    KeyEvent {
-                                        code: KeyCode::Char(c),
-                                        ..
-                                    } => {
-                                        tx.send(c).unwrap_or(());
-                                    }
-                                    _ => (),
-                                }
-                            },
-                            ApplicationState::Command => {
-                                match event {
-                                    KeyEvent {
-                                        code: KeyCode::Char('x'),
-                                        modifiers: KeyModifiers::CONTROL,
-                                        ..
-                                    } => { state = ApplicationState::Io; break},
-                                    KeyEvent {
-                                        code: KeyCode::Char(code),
-                                        modifiers: KeyModifiers::CONTROL,
-                                        ..
-                                    } => {
-                                        match commands.get(&code) {
-                                            Some(func) => func(),
-                                            _ => ()
-                                        }
-                                        state = ApplicationState::Io;
-                                    }
-                                    _ => state = ApplicationState::Io
-                                }
-                            }
-                        }
+        let state: Arc<RwLock<ApplicationState>> = Arc::clone(&self.state);
+        _ = thread::spawn(move || loop {
+            if let Event::Key(event) = event::read().expect("Failed to read line") {
+                match event {
+                    KeyEvent {
+                        code: KeyCode::Char('a'),
+                        modifiers: KeyModifiers::CONTROL,
+                        ..
+                    } => *state.write().unwrap() = ApplicationState::Command,
+                    KeyEvent {
+                        code: KeyCode::Char(c),
+                        ..
+                    } => {
+                        tx.send(c).unwrap_or(());
                     }
+                    _ => (),
                 }
-            });
+            }
+        });
     }
 }
 
