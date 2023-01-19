@@ -21,6 +21,7 @@ enum ArgsParity {
 
 /// Really Simple Communication application
 /// Much like picocom.
+/// Press C-a C-h for help with commands 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {

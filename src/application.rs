@@ -69,6 +69,7 @@ impl Application {
                                 'q' => break,
                                 'u' => self.baud_up(),
                                 'd' => self.baud_down(),
+                                'h' => print_commands(),
                                 _ => ()
                             }
                             *lock = ApplicationState::Io;
@@ -133,7 +134,17 @@ impl Application {
 
 fn print_info_line(line: &str) {
     println!("\r");
-    println!("*** {line} ***\r")
+    println!("*** {line} ***\r");
+}
+
+fn print_commands() {
+    println!("\r");
+    print_info_line("Available commands - All prefixed by C-a");
+    print_info_line("C-u: Increase baudrate");
+    print_info_line("C-d: Decrease baudrate");
+    print_info_line("C-h: Show commands (this)");
+    print_info_line("C-q: Quit rscom");
+
 }
 
 impl Drop for Application {
