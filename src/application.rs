@@ -16,6 +16,7 @@ use std::{
 enum ApplicationState {
     Command,
     Io,
+    UserInput,
 }
 
 static BAUD_RATES: [u32; 6] = [9600, 19200, 33400, 57600, 115_200, 230_400];
@@ -24,6 +25,7 @@ pub struct Application {
     port: Box<dyn SerialPort>,
     state: Arc<RwLock<ApplicationState>>,
     baud_index: usize,
+    print_below: u8,
 }
 
 impl Application {
@@ -33,6 +35,7 @@ impl Application {
             port,
             state: Arc::new(RwLock::new(ApplicationState::Io)),
             baud_index: 0,
+            print_below: 0,
         }
     }
 
@@ -44,10 +47,22 @@ impl Application {
 
     fn launch_serial_comms(&mut self, rx: Receiver<char>) {
         let mut serial_buf = vec![0; 100];
+        let mut user_input: String = String::new();
         loop {
             match self.port.read(serial_buf.as_mut_slice()) {
                 Ok(size) => {
-                    io::stdout().write_all(&serial_buf[..size]).unwrap();
+                    for i in 0..size {
+                        if serial_buf[i] < self.print_below
+                        {
+
+                            print!("<0x{:02X}>", serial_buf[i]);
+                        }
+                        else
+                        {
+                            io::stdout().write_all(&serial_buf[i .. i + 1]).unwrap();
+                        }
+                    }
+
                     io::stdout().flush().unwrap();
                 },
                 Err(ref error) if error.kind() == io::ErrorKind::TimedOut => (),
@@ -70,13 +85,34 @@ impl Application {
                                 'u' => self.baud_up(),
                                 'd' => self.baud_down(),
                                 'h' => print_commands(),
-                                _ => ()
+                                'x' => {
+                                    *lock = ApplicationState::UserInput;
+                                    user_input = String::new();
+                                    println!("\r");
+                                    print!("*** Type Hex value - Finish with enter: ");
+                                },
+                                _ => (),
                             }
-                            *lock = ApplicationState::Io;
+                            if matches!(*lock, ApplicationState::Command) {
+                                *lock = ApplicationState::Io;
+                            }
+                        }
+                        ApplicationState::UserInput => {
+                            if key == '\r'
+                            {
+                                let i = i64::from_str_radix(&user_input, 16).unwrap();
+                                self.print_below = i.try_into().unwrap_or_default();
+                                println!("\r");
+                                *lock = ApplicationState::Io;
+                            }
+                            else {
+                                print!("{key}");
+                                user_input.push(key);
+                            }
 
                         },
                     }
-                },
+                }
                 Err(TryRecvError::Empty) => (),
                 Err(TryRecvError::Disconnected) => break,
             }
@@ -84,16 +120,17 @@ impl Application {
         }
     }
 
-    fn baud_down(&mut self)
-    {
-        self.baud_index = self.baud_index.checked_sub(1).unwrap_or(BAUD_RATES.len() - 1);
+    fn baud_down(&mut self) {
+        self.baud_index = self
+            .baud_index
+            .checked_sub(1)
+            .unwrap_or(BAUD_RATES.len() - 1);
         self.set_baud_rate();
     }
 
     fn baud_up(&mut self) {
         self.baud_index += 1;
         self.set_baud_rate();
-
     }
 
     fn set_baud_rate(&mut self) {
@@ -124,12 +161,17 @@ impl Application {
                         ..
                     } => {
                         tx.send(c).unwrap_or(());
-                    }
-                    _ => (),
+                    },
+                    KeyEvent {
+                        code: KeyCode::Enter,
+                        ..
+                    } => tx.send('\r').unwrap_or(()),
+                    _ => print!("Default!!!!"),
                 }
             }
         });
     }
+
 }
 
 fn print_info_line(line: &str) {
@@ -142,9 +184,9 @@ fn print_commands() {
     print_info_line("Available commands - All prefixed by C-a");
     print_info_line("C-u: Increase baudrate");
     print_info_line("C-d: Decrease baudrate");
+    print_info_line("C-x: Print characters below X as <HEX>");
     print_info_line("C-h: Show commands (this)");
     print_info_line("C-q: Quit rscom");
-
 }
 
 impl Drop for Application {
