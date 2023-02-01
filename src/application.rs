@@ -40,6 +40,8 @@ impl Application {
     }
 
     pub fn run(&mut self) {
+        const VERSION: &str = env!("CARGO_PKG_VERSION");
+        println!("rs-com v{VERSION}\r");
         let (tx, rx): (Sender<char>, Receiver<char>) = mpsc::channel();
         self.launch_input_reader(tx);
         self.launch_serial_comms(rx);
