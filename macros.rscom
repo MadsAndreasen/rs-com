@@ -1,0 +1,9 @@
+macros:
+    - name: Macro 1
+      content: FooBar
+    - name: Macro 2
+      content: Hest
+    - name: Macro 3
+      content: AnotherMacro
+    - name: Macro 4
+      content: OneMore

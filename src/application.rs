@@ -13,6 +13,8 @@ use std::{
     time::Duration,
 };
 
+use crate::Macro;
+
 enum ApplicationState {
     Command,
     Io,
@@ -26,22 +28,24 @@ pub struct Application {
     state: Arc<RwLock<ApplicationState>>,
     baud_index: usize,
     print_below: u8,
+    macros: Vec<Macro>,
 }
 
 impl Application {
-    pub fn new(port: Box<dyn SerialPort>) -> Self {
+    pub fn new(port: Box<dyn SerialPort>, macros: Vec<Macro>) -> Self {
         _ = terminal::enable_raw_mode();
         Self {
             port,
             state: Arc::new(RwLock::new(ApplicationState::Io)),
             baud_index: 0,
             print_below: 0,
+            macros,
         }
     }
 
     pub fn run(&mut self) {
         const VERSION: &str = env!("CARGO_PKG_VERSION");
-        println!("rs-com v{VERSION}\r");
+        println!("rscom v{VERSION}\r");
         let (tx, rx): (Sender<char>, Receiver<char>) = mpsc::channel();
         self.launch_input_reader(tx);
         self.launch_serial_comms(rx);
@@ -92,6 +96,16 @@ impl Application {
                                     user_input = String::new();
                                     println!("\r");
                                     print!("*** Type Hex value - Finish with enter: ");
+                                },
+                                'l' => self.list_macros(),
+                                '0'..='9' => {
+                                    let macro_num= key.to_digit(10).unwrap() as usize;
+                                    let selected_macro = self.macros.get(macro_num).unwrap();
+                                    _ = self
+                                    .port
+                                    .write(selected_macro.content.as_bytes())
+                                    .expect("Write failed")
+
                                 },
                                 _ => (),
                             }
@@ -174,10 +188,18 @@ impl Application {
         });
     }
 
+    fn list_macros(&self) {
+        println!("\r");
+        print_info_line("List of Macros");
+        for (index, element) in self.macros.iter().enumerate() {
+            let content = &element.content;
+            print_info_line(&format!("{index} - {content}"));
+        }
+    }
+
 }
 
 fn print_info_line(line: &str) {
-    println!("\r");
     println!("*** {line} ***\r");
 }
 
@@ -187,6 +209,7 @@ fn print_commands() {
     print_info_line("C-u: Increase baudrate");
     print_info_line("C-d: Decrease baudrate");
     print_info_line("C-x: Print characters below X as <HEX>");
+    print_info_line("C-[0..9]: Send macro contents");
     print_info_line("C-h: Show commands (this)");
     print_info_line("C-q: Quit rscom");
 }

@@ -5,6 +5,9 @@ use application::Application;
 use clap::{ValueEnum, Parser};
 use std::{error::Error};
 
+use serde::{Deserialize};
+use serde_yaml::{self};
+
 #[derive(Debug, Clone, ValueEnum)]
 enum ArgsFlowControl {
     Soft,
@@ -19,9 +22,20 @@ enum ArgsParity {
     None,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct Macro {
+    name: String,
+    content: String
+}
+
+#[derive(Debug, Deserialize)]
+struct Macros {
+    macros: Vec<Macro>
+}
+
 /// Really Simple Communication application
 /// Much like picocom.
-/// Press C-a C-h for help with commands 
+/// Press C-a C-h for help with commands
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
@@ -63,7 +77,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         .open()
         .expect("Failed to open");
 
-    let mut app = Application::new(port);
+    let macros = load_macrosj();
+    let mut app = Application::new(port, macros);
     app.run();
     Ok(())
+}
+
+
+fn load_macrosj() -> Vec<Macro>
+{
+    if let Ok(f) = std::fs::File::open("macros.rscom") {
+        let macros: Macros = serde_yaml::from_reader(f).expect("Macros file could not be parsed");
+        macros.macros
+    }
+    else {
+        Vec::<Macro>::new()
+    }
+
 }
