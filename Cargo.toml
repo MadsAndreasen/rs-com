@@ -21,4 +21,4 @@ clap = {version = "4.1.4", features = ["derive"]}
 serialport = {version = "4.2.0"}
 crossterm = "0.26.1"
 serde = { version = "1.0.152", features = ["derive"] }
-serde_yaml = "0.9.17"
+serde_yaml = "0.9.19"
