@@ -20,5 +20,5 @@ path = "src/main.rs"
 clap = {version = "4.5.4", features = ["derive"]}
 serialport = {version = "4.3.0"}
 crossterm = "0.27.0"
-serde = { version = "1.0.201", features = ["derive"] }
+serde = { version = "1.0.203", features = ["derive"] }
 serde_yaml = "0.9.34"
